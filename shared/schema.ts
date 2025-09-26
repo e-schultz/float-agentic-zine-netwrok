@@ -124,6 +124,7 @@ export const conversations = pgTable("conversations", {
   id: varchar("id").primaryKey().default(sql`gen_random_uuid()`),
   title: text("title").notNull(),
   content: text("content").notNull(),
+  floatAstId: varchar("float_ast_id").references(() => floatAsts.id),
   createdAt: timestamp("created_at").defaultNow(),
   userId: varchar("user_id").references(() => users.id),
 });
@@ -157,6 +158,7 @@ export const insertConversationSchema = createInsertSchema(conversations).pick({
   title: true,
   content: true,
   userId: true,
+  floatAstId: true,
 });
 
 export const insertZineSchema = createInsertSchema(zines).pick({

@@ -1,14 +1,19 @@
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
-import { MessageSquare, Bot, User, Zap, Link, Lightbulb } from "lucide-react";
+import { MessageSquare, Bot, User, Zap, Link, Lightbulb, Upload } from "lucide-react";
 import type { FloatNode, Message, Persona } from "@shared/schema";
+import { useToast } from "@/hooks/use-toast";
+import { useMutation, useQuery } from "@tanstack/react-query";
+import { queryClient } from "@/lib/queryClient";
+import type { FloatASTRecord } from "@shared/schema";
 
 interface ConversationReaderProps {
   conversation: string;
+  conversationId?: string;
   floatNodes?: FloatNode[];
 }
 
@@ -81,9 +86,125 @@ const mockFloatNodes: FloatNode[] = [
   },
 ];
 
-export function ConversationReader({ conversation, floatNodes = mockFloatNodes }: ConversationReaderProps) {
+// Helper function to parse conversation text into messages
+function parseConversationText(text: string): Message[] {
+  const lines = text.split('\n').filter(line => line.trim());
+  const messages: Message[] = [];
+  
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const messageMatch = line.match(/^([^:]+):\s*(.+)$/);
+    
+    if (messageMatch) {
+      const [, authorName, messageText] = messageMatch;
+      const isAssistant = authorName.toLowerCase().includes('assistant') || 
+                         authorName.toLowerCase().includes('claude') ||
+                         authorName.toLowerCase().includes('ai');
+      
+      const persona: Persona = {
+        id: `persona-${authorName}`,
+        name: authorName,
+        role: isAssistant ? "researcher" : "author",
+        colorToken: isAssistant ? "text-purple-400" : "text-blue-400",
+      };
+      
+      messages.push({
+        id: `msg-${i}`,
+        convoId: "parsed",
+        author: persona,
+        createdAt: new Date().toISOString(),
+        text: messageText,
+      });
+    } else if (line.trim()) {
+      // Handle lines without clear author attribution
+      messages.push({
+        id: `msg-${i}`,
+        convoId: "parsed",
+        author: {
+          id: "system",
+          name: "System",
+          role: "sysop",
+          colorToken: "text-gray-400",
+        },
+        createdAt: new Date().toISOString(),
+        text: line,
+      });
+    }
+  }
+  
+  return messages;
+}
+
+export function ConversationReader({ conversation, conversationId, floatNodes = mockFloatNodes }: ConversationReaderProps) {
   const [selectedNode, setSelectedNode] = useState<string | null>(null);
-  const messages = mockMessages; // todo: remove mock functionality
+  const [parsedMessages, setParsedMessages] = useState<Message[]>([]);
+  const { toast } = useToast();
+  
+  // Fetch conversation details to get floatAstId
+  const { data: conversationDetails } = useQuery({
+    queryKey: ["/api/conversations", conversationId],
+    queryFn: async () => {
+      if (!conversationId) return null;
+      const response = await fetch(`/api/conversations/${conversationId}`);
+      if (!response.ok) throw new Error("Failed to fetch conversation");
+      return response.json();
+    },
+    enabled: !!conversationId,
+  });
+  
+  // Fetch FloatAST data if available
+  const { data: floatAstRecord } = useQuery({
+    queryKey: ["/api/float-asts", conversationDetails?.floatAstId],
+    queryFn: async () => {
+      if (!conversationDetails?.floatAstId) return null;
+      const response = await fetch(`/api/float-asts/${conversationDetails.floatAstId}`);
+      if (!response.ok) throw new Error("Failed to fetch FloatAST");
+      return response.json() as Promise<FloatASTRecord>;
+    },
+    enabled: !!conversationDetails?.floatAstId,
+  });
+  
+  // Parse conversation text into messages
+  useEffect(() => {
+    if (conversation && conversation !== "Sample conversation data") {
+      const parsed = parseConversationText(conversation);
+      setParsedMessages(parsed);
+    } else {
+      setParsedMessages(mockMessages);
+    }
+  }, [conversation]);
+  
+  // Parse conversation to FloatAST
+  const parseToFloatMutation = useMutation({
+    mutationFn: async () => {
+      if (!conversationId) throw new Error("No conversation ID");
+      const response = await fetch(`/api/conversations/${conversationId}/parse`, {
+        method: "POST",
+      });
+      if (!response.ok) throw new Error("Failed to parse conversation");
+      return response.json();
+    },
+    onSuccess: (data) => {
+      // Invalidate queries to refresh data
+      queryClient.invalidateQueries({ queryKey: ["/api/conversations", conversationId] });
+      queryClient.invalidateQueries({ queryKey: ["/api/float-asts"] });
+      toast({
+        title: "Success",
+        description: "Conversation parsed into FloatAST structure",
+      });
+    },
+    onError: (error: any) => {
+      toast({
+        title: "Error",
+        description: error.message || "Failed to parse conversation",
+      });
+    },
+  });
+  
+  const messages = parsedMessages.length > 0 ? parsedMessages : mockMessages;
+  
+  // Use FloatAST nodes if available, otherwise fall back to mock data
+  const effectiveFloatNodes: FloatNode[] = floatAstRecord?.data ? (floatAstRecord.data as any).nodes || floatNodes : floatNodes;
 
   const getMarkerIcon = (markers?: FloatNode['float_markers']) => {
     if (!markers) return null;
@@ -122,16 +243,30 @@ export function ConversationReader({ conversation, floatNodes = mockFloatNodes }
       <div className="flex-1">
         <Card className="h-full">
           <CardHeader>
-            <CardTitle className="flex items-center gap-2 font-mono">
-              <MessageSquare className="h-5 w-5" />
-              Conversation Stream
-            </CardTitle>
+            <div className="flex items-center justify-between">
+              <CardTitle className="flex items-center gap-2 font-mono">
+                <MessageSquare className="h-5 w-5" />
+                Conversation Stream
+              </CardTitle>
+              {conversationId && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => parseToFloatMutation.mutate()}
+                  disabled={parseToFloatMutation.isPending}
+                  data-testid="button-parse-to-float"
+                >
+                  <Upload className="h-4 w-4 mr-2" />
+                  {parseToFloatMutation.isPending ? "Parsing..." : "Parse to FloatAST"}
+                </Button>
+              )}
+            </div>
           </CardHeader>
           <CardContent className="p-0">
             <ScrollArea className="h-[400px] px-6">
               <div className="space-y-4 pb-4">
                 {messages.map((message, index) => {
-                  const node = floatNodes.find(n => n.content.raw === message.text);
+                  const node = effectiveFloatNodes.find(n => n.content.raw === message.text);
                   const isSelected = selectedNode === node?.id;
                   
                   return (
