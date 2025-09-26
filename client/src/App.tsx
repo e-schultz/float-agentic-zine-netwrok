@@ -1,3 +1,4 @@
+import { useState, useEffect, createContext, useContext } from "react";
 import { Switch, Route } from "wouter";
 import { queryClient } from "./lib/queryClient";
 import { QueryClientProvider } from "@tanstack/react-query";
@@ -7,7 +8,6 @@ import { SidebarProvider, SidebarTrigger } from "@/components/ui/sidebar";
 import { AppSidebar } from "@/components/AppSidebar";
 import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { CommandPalette } from "@/components/CommandPalette";
-import { useState, useEffect } from "react";
 import { Search } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
@@ -18,6 +18,24 @@ import Threads from "@/pages/Threads";
 import Zines from "@/pages/Zines";
 import AST from "@/pages/AST";
 import NotFound from "@/pages/not-found";
+
+// Context for sharing current conversation state across components
+interface AppContextType {
+  currentConversationId?: string;
+  currentFloatAstId?: string;
+  setCurrentConversationId: (id: string | undefined) => void;
+  setCurrentFloatAstId: (id: string | undefined) => void;
+}
+
+const AppContext = createContext<AppContextType | null>(null);
+
+export const useAppContext = () => {
+  const context = useContext(AppContext);
+  if (!context) {
+    throw new Error("useAppContext must be used within AppContext.Provider");
+  }
+  return context;
+};
 
 function Router() {
   return (
@@ -34,6 +52,8 @@ function Router() {
 
 export default function App() {
   const [commandPaletteOpen, setCommandPaletteOpen] = useState(false);
+  const [currentConversationId, setCurrentConversationId] = useState<string | undefined>();
+  const [currentFloatAstId, setCurrentFloatAstId] = useState<string | undefined>();
 
   // Global keyboard shortcuts
   useEffect(() => {
@@ -57,42 +77,63 @@ export default function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
-        <SidebarProvider style={style as React.CSSProperties}>
-          <div className="flex h-screen w-full">
-            <AppSidebar />
-            <div className="flex flex-col flex-1">
-              <header className="flex items-center justify-between p-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
-                <div className="flex items-center gap-4">
-                  <SidebarTrigger data-testid="button-sidebar-toggle" />
-                  <div className="font-mono text-sm text-muted-foreground">
-                    Agentic Zine Network
+        <AppContext.Provider
+          value={{
+            currentConversationId,
+            currentFloatAstId,
+            setCurrentConversationId,
+            setCurrentFloatAstId,
+          }}
+        >
+          <SidebarProvider style={style as React.CSSProperties}>
+            <div className="flex h-screen w-full">
+              <AppSidebar />
+              <div className="flex flex-col flex-1">
+                <header className="flex items-center justify-between p-4 border-b bg-background/95 backdrop-blur supports-[backdrop-filter]:bg-background/60">
+                  <div className="flex items-center gap-4">
+                    <SidebarTrigger data-testid="button-sidebar-toggle" />
+                    <div className="font-mono text-sm text-muted-foreground">
+                      Agentic Zine Network
+                      {currentConversationId && (
+                        <span className="ml-2 text-purple-400">
+                          • Conv: {currentConversationId.slice(0, 8)}
+                        </span>
+                      )}
+                      {currentFloatAstId && (
+                        <span className="ml-2 text-blue-400">
+                          • AST: {currentFloatAstId.slice(0, 8)}
+                        </span>
+                      )}
+                    </div>
                   </div>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button
-                    variant="ghost"
-                    size="sm"
-                    onClick={() => setCommandPaletteOpen(true)}
-                    data-testid="button-command-palette-global"
-                  >
-                    <Search className="h-4 w-4 mr-2" />
-                    <span className="hidden sm:inline font-mono">⌘K</span>
-                  </Button>
-                  <ThemeToggle />
-                </div>
-              </header>
-              <main className="flex-1 overflow-auto">
-                <div className="container mx-auto px-6 py-6">
-                  <Router />
-                </div>
-              </main>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => setCommandPaletteOpen(true)}
+                      data-testid="button-command-palette-global"
+                    >
+                      <Search className="h-4 w-4 mr-2" />
+                      <span className="hidden sm:inline font-mono">⌘K</span>
+                    </Button>
+                    <ThemeToggle />
+                  </div>
+                </header>
+                <main className="flex-1 overflow-auto">
+                  <div className="container mx-auto px-6 py-6">
+                    <Router />
+                  </div>
+                </main>
+              </div>
             </div>
-          </div>
-          <CommandPalette 
-            open={commandPaletteOpen} 
-            onOpenChange={setCommandPaletteOpen} 
-          />
-        </SidebarProvider>
+            <CommandPalette 
+              open={commandPaletteOpen} 
+              onOpenChange={setCommandPaletteOpen}
+              currentConversationId={currentConversationId}
+              currentFloatAstId={currentFloatAstId}
+            />
+          </SidebarProvider>
+        </AppContext.Provider>
         <Toaster />
       </TooltipProvider>
     </QueryClientProvider>

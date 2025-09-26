@@ -15,6 +15,7 @@ import { zodResolver } from "@hookform/resolvers/zod";
 import { insertConversationSchema, type Conversation } from "@shared/schema";
 import { z } from "zod";
 import { useToast } from "@/hooks/use-toast";
+import { useAppContext } from "@/App";
 
 // Form schema for creating conversations
 const conversationFormSchema = insertConversationSchema.extend({
@@ -29,6 +30,20 @@ export default function Conversations() {
   const [uploadDialogOpen, setUploadDialogOpen] = useState(false);
   const [selectedConversationId, setSelectedConversationId] = useState<string | null>(null);
   const { toast } = useToast();
+  
+  // Safely get app context
+  let setCurrentConversationId: ((id: string | undefined) => void) | undefined;
+  let setCurrentFloatAstId: ((id: string | undefined) => void) | undefined;
+  
+  try {
+    const context = useAppContext();
+    setCurrentConversationId = context.setCurrentConversationId;
+    setCurrentFloatAstId = context.setCurrentFloatAstId;
+  } catch (error) {
+    // Context not available, provide no-op functions
+    setCurrentConversationId = () => {};
+    setCurrentFloatAstId = () => {};
+  }
 
   // Fetch conversations from API
   const { data: conversations, isLoading: conversationsLoading } = useQuery({
@@ -98,12 +113,30 @@ export default function Conversations() {
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, []);
 
-  // Auto-select first conversation if none selected
+  // Auto-select first conversation if none selected and update global state
   useEffect(() => {
     if (conversations && conversations.length > 0 && !selectedConversationId) {
       setSelectedConversationId(conversations[0].id);
     }
   }, [conversations, selectedConversationId]);
+  
+  // Update global context when conversation selection changes
+  useEffect(() => {
+    if (setCurrentConversationId) {
+      setCurrentConversationId(selectedConversationId || undefined);
+    }
+  }, [selectedConversationId, setCurrentConversationId]);
+  
+  // Update global context when FloatAST is available
+  useEffect(() => {
+    if (setCurrentFloatAstId) {
+      if (selectedConversation?.floatAstId) {
+        setCurrentFloatAstId(selectedConversation.floatAstId);
+      } else {
+        setCurrentFloatAstId(undefined);
+      }
+    }
+  }, [selectedConversation?.floatAstId, setCurrentFloatAstId]);
 
   const onSubmit = (data: ConversationFormData) => {
     createConversationMutation.mutate(data);
